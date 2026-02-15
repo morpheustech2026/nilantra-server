@@ -1,85 +1,88 @@
 import Product from "../models/productModel.js";
 import slugify from "slugify";
 
-/* ===============================
-    1. CREATE PRODUCT
-================================= */
+/* =========================
+   HELPER FUNCTIONS
+========================= */
+const ensureArray = (data) => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (typeof data === "string") {
+    return data.split(',').map(item => item.trim()).filter(item => item !== "");
+  }
+  return [data];
+};
+
+/* =========================
+   CREATE PRODUCT
+========================= */
 export const createProduct = async (req, res) => {
   try {
+    // 1. Auth Check
+    if (!req.user) {
+      return res.status(401).json({ message: "ലോഗിൻ വിവരങ്ങൾ ലഭ്യമല്ല!" });
+    }
+
+    const imageUrls = req.files ? req.files.map(file => file.path) : [];
+
     const {
-      name,
-      description,
-      mainCategory,
-      subCategory,
-      price,
-      offerPrice,
-      material,
-      dimensions, 
-      colors,
-      images,
-      stock,
-      isFeatured,
-      isBestSeller,
-      isActive,
-      seat 
+      description, price,
+      offerPrice, material, stock, dimensions, colors, seat,
+      isFeatured, isBestSeller, isActive
     } = req.body;
 
-    
-    if (!name || !description || !mainCategory || !subCategory || !price || !images || images.length === 0) {
-      return res.status(400).json({ message: "Required fields are missing" });
+    const name = req.body.name;
+    const mainCategory = req.body.mainCategory;
+    const subCategory = req.body.subCategory;
+
+    if (!name || !mainCategory || !subCategory) {
+      return res.status(400).json({
+        message: `Missing: ${!name ? 'Name ' : ''}${!mainCategory ? 'Category ' : ''}${!subCategory ? 'SubCat' : ''}`
+      });
     }
 
-   
-    let slug = slugify(name, { lower: true, strict: true });
-    const existingProduct = await Product.findOne({ slug });
-    if (existingProduct) {
-      slug = `${slug}-${Math.floor(Math.random() * 1000)}`;
-    }
-
-    const product = new Product({
+    const productData = {
       name,
-      slug,
-      description,
+      description: description || "",
       mainCategory,
       subCategory,
-      price,
-      offerPrice,
-      material,
-      dimensions,
-      colors,
-      images,
-      stock,
-      isFeatured,
-      isBestSeller,
-      isActive: isActive !== undefined ? isActive : true,
-      seat, 
-      vendor: req.user.id 
-    });
+      price: Number(price) || 0,
+      offerPrice: Number(offerPrice) || 0,
+      material: material || "",
+      stock: Number(stock) || 0,
+      vendor: req.user.id,
+      images: imageUrls,
+      slug: slugify(name, { lower: true, strict: true }) + "-" + Date.now(),
 
+      // Booleans (String to Boolean conversion)
+      isFeatured: String(isFeatured) === "true",
+      isBestSeller: String(isBestSeller) === "true",
+      isActive: String(isActive) === "true",
+
+      // Arrays handling
+      colors: colors ? colors.split(',').map(c => c.trim()) : [],
+      seat: seat ? seat.split(',').map(Number).filter(n => !isNaN(n)) : [],
+
+      // Dimensions Parsing
+      dimensions: typeof dimensions === "string" ? JSON.parse(dimensions) : dimensions
+    };
+
+    const product = new Product(productData);
     const savedProduct = await product.save();
+
     res.status(201).json(savedProduct);
 
   } catch (err) {
-    res.status(500).json({ message: "Error creating product: " + err.message });
+    res.status(500).json({ message: err.message });
   }
 };
 
-/* ===============================
-    2. GET PRODUCTS (With Filters)
-================================= */
+/* =========================
+   GET ALL PRODUCTS
+========================= */
 export const getProducts = async (req, res) => {
   try {
-    const { main, sub, offer, best, featured, seatCount } = req.query;
-    let query = { isActive: true };
-
-    if (main) query.mainCategory = main;
-    if (sub) query.subCategory = sub;
-    if (offer === "true") query.offerPrice = { $exists: true, $ne: null };
-    if (best === "true") query.isBestSeller = true;
-    if (featured === "true") query.isFeatured = true;
-    if (seatCount) query.seat = seatCount; 
-
-    const products = await Product.find(query)
+    const products = await Product.find()
       .populate("vendor", "name email")
       .sort({ createdAt: -1 });
 
@@ -89,14 +92,12 @@ export const getProducts = async (req, res) => {
   }
 };
 
-/* ===============================
-    3. GET SINGLE PRODUCT
-================================= */
+/* =========================
+   GET SINGLE PRODUCT
+========================= */
 export const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
-      .populate("vendor", "name email");
-
+    const product = await Product.findById(req.params.id).populate("vendor", "name");
     if (!product) return res.status(404).json({ message: "Product not found" });
 
     res.status(200).json(product);
@@ -105,50 +106,62 @@ export const getProductById = async (req, res) => {
   }
 };
 
-/* ===============================
-    4. UPDATE PRODUCT
-================================= */
+/* =========================
+   UPDATE PRODUCT
+========================= */
 export const updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    
-    if (product.vendor.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: "Not authorized to update this product" });
+    let finalImages = [];
+
+    // 1. (Existing Images)
+    if (req.body.existingImages) {
+      finalImages = ensureArray(req.body.existingImages);
     }
 
-    if (req.body.name) {
-      req.body.slug = slugify(req.body.name, { lower: true, strict: true });
+    // 2. add new images
+    if (req.files && req.files.length > 0) {
+      const newUrls = req.files.map(file => file.path);
+      finalImages = [...finalImages, ...newUrls];
     }
+
+    // 3. Update Data Object
+    const updateFields = {
+      ...req.body,
+      price: Number(req.body.price),
+      offerPrice: Number(req.body.offerPrice || 0),
+      stock: Number(req.body.stock),
+      images: finalImages,
+      dimensions: typeof req.body.dimensions === "string" ? JSON.parse(req.body.dimensions) : req.body.dimensions,
+      colors: ensureArray(req.body.colors),
+      seat: ensureArray(req.body.seat).map(Number).filter(n => !isNaN(n)),
+      isFeatured: String(req.body.isFeatured) === "true",
+      isBestSeller: String(req.body.isBestSeller) === "true",
+      isActive: String(req.body.isActive) === "true",
+    };
 
     const updatedProduct = await Product.findByIdAndUpdate(
       req.params.id,
-      { $set: req.body },
+      { $set: updateFields },
       { new: true, runValidators: true }
     );
 
     res.status(200).json(updatedProduct);
+
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-/* ===============================
-    5. DELETE PRODUCT
-================================= */
+/* =========================
+   DELETE PRODUCT
+========================= */
 export const deleteProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ message: "Product not found" });
-
-    
-    if (product.vendor.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: "Not authorized to delete this product" });
-    }
-
     await Product.findByIdAndDelete(req.params.id);
-    res.status(200).json({ message: "Product deleted successfully" });
+    res.status(200).json({ message: "Product Deleted Successfully" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
