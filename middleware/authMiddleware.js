@@ -7,7 +7,7 @@ export const protect = async (req, res, next) => {
 
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
-            token = req.headers.authorization.split(' ')[1]; 
+            token = req.headers.authorization.split(' ')[1];
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             
            
@@ -20,12 +20,12 @@ export const protect = async (req, res, next) => {
             next();
         } catch (error) {
             console.error("Auth Error:", error);
-            res.status(401).json({ message: "Not authorized, token failed" });
+            return res.status(401).json({ message: "Not authorized, token failed" });
         }
     }
 
     if (!token) {
-        res.status(401).json({ message: "No token, authorization denied" });
+        return res.status(401).json({ message: "No token, authorization denied" });
     }
 };
 
@@ -37,7 +37,7 @@ export const isAdmin = (req, res, next) => {
     if (req.user && (req.user.role === 'admin' || req.user.isAdmin === true)) {
         next();
     } else {
-        res.status(403).json({ message: "Access denied! Admins only." });
+        return res.status(403).json({ message: "Access denied! Admins only." });
     }
 };
 

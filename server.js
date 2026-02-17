@@ -29,9 +29,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 app.use('/uploads', express.static(path.join(__dirname, '/uploads')));
 
@@ -55,14 +54,19 @@ app.use((req, res, next) => {
 });
 
 // Global Error Handler
+// Global Error Handler
 app.use((err, req, res, next) => {
+    // എറർ ഒബ്ജക്റ്റ് ആണോ എന്ന് ചെക്ക് ചെയ്യുന്നു
+    console.log("--- ERROR DETECTED ---");
+    console.log("Error type:", typeof err);
+    console.log("Error content:", err); 
+
     const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
     res.status(statusCode).json({
-        message: err.message,
-        stack: process.env.NODE_ENV === 'production' ? null : err.stack,
+        message: err?.message || err || "Unknown Server Error",
+        stack: process.env.NODE_ENV === 'production' ? null : err?.stack,
     });
 });
-
 app.listen(PORT, () => {
     console.log(`Server is running at port ${PORT}`);
 });
