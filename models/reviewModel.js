@@ -28,6 +28,10 @@ const reviewSchema = mongoose.Schema(
       type: String,
       required: true,
     },
+    reply: {
+      type: String,
+      default: ""
+    },
     images: [String],
   },
   {
