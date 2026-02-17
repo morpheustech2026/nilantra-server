@@ -9,9 +9,12 @@ import {
 } from '../controllers/reviewController.js';
 import { protect } from '../middleware/authMiddleware.js'; 
 
+
 const router = express.Router();
 
-router.post('/general', createReview);
+router.post('/general', protect, createReview);
+
+
 router.get('/', getAllReviews);
 router.get('/general', getGeneralReviews);
 router.get('/product/:productId', getProductReviews);
