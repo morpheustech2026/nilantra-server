@@ -4,13 +4,24 @@ import slugify from "slugify";
 /* =========================
    HELPER FUNCTIONS
 ========================= */
+
+// Convert to Array safely
 const ensureArray = (data) => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   if (typeof data === "string") {
-    return data.split(',').map(item => item.trim()).filter(item => item !== "");
+    return data
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item !== "");
   }
   return [data];
+};
+
+// Safe number conversion
+const toNumber = (value, defaultValue = 0) => {
+  const num = Number(value);
+  return isNaN(num) ? defaultValue : num;
 };
 
 /* =========================
@@ -18,61 +29,85 @@ const ensureArray = (data) => {
 ========================= */
 export const createProduct = async (req, res) => {
   try {
-    // 1. Auth Check
     if (!req.user) {
-      return res.status(401).json({ message: "ലോഗിൻ വിവരങ്ങൾ ലഭ്യമല്ല!" });
+      return res.status(401).json({ message: "Login required" });
     }
 
-    const imageUrls = req.files ? req.files.map(file => file.path) : [];
-
     const {
-      description, price,
-      offerPrice, material, stock, dimensions, colors, seat,
-      isFeatured, isBestSeller, isActive
+      name,
+      description,
+      mainCategory,
+      subCategory,
+      price,
+      offerPrice,
+      material,
+      stock,
+      dimensions,
+      colors,
+      seat,
+      isFeatured,
+      isBestSeller,
+      isActive,
     } = req.body;
 
-    const name = req.body.name;
-    const mainCategory = req.body.mainCategory;
-    const subCategory = req.body.subCategory;
-
+    // Required validation
     if (!name || !mainCategory || !subCategory) {
       return res.status(400).json({
-        message: `Missing: ${!name ? 'Name ' : ''}${!mainCategory ? 'Category ' : ''}${!subCategory ? 'SubCat' : ''}`
+        message: `Missing fields: ${
+          !name ? "Name " : ""
+        }${!mainCategory ? "MainCategory " : ""}${
+          !subCategory ? "SubCategory" : ""
+        }`,
       });
     }
 
+    const imageUrls = req.files
+      ? req.files.map((file) => file.path)
+      : [];
+
     const productData = {
-      name,
+      name: name.trim(),
       description: description || "",
       mainCategory,
       subCategory,
-      price: Number(price) || 0,
-      offerPrice: Number(offerPrice) || 0,
+      price: toNumber(price),
+      offerPrice: toNumber(offerPrice),
       material: material || "",
-      stock: Number(stock) || 0,
+      stock: toNumber(stock),
       vendor: req.user.id,
       images: imageUrls,
-      slug: slugify(name, { lower: true, strict: true }) + "-" + Date.now(),
+      slug:
+        slugify(name, { lower: true, strict: true }) +
+        "-" +
+        Date.now(),
 
-      // Booleans (String to Boolean conversion)
+      // Boolean handling
       isFeatured: String(isFeatured) === "true",
       isBestSeller: String(isBestSeller) === "true",
-      isActive: String(isActive) === "true",
+      isActive:
+        isActive !== undefined
+          ? String(isActive) === "true"
+          : true,
 
-      // Arrays handling
-      colors: colors ? colors.split(',').map(c => c.trim()) : [],
-      seat: seat ? seat.split(',').map(Number).filter(n => !isNaN(n)) : [],
+      // Array handling
+      colors: ensureArray(colors),
+      seat: ensureArray(seat)
+        .map((n) => Number(n))
+        .filter((n) => !isNaN(n)),
 
-      // Dimensions Parsing
-      dimensions: typeof dimensions === "string" ? JSON.parse(dimensions) : dimensions
+      // JSON parse safely
+      dimensions:
+        typeof dimensions === "string"
+          ? JSON.parse(dimensions || "{}")
+          : dimensions || {},
     };
 
     const product = new Product(productData);
     const savedProduct = await product.save();
 
     res.status(201).json(savedProduct);
-
   } catch (err) {
+    console.error("Create Product Error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -82,7 +117,13 @@ export const createProduct = async (req, res) => {
 ========================= */
 export const getProducts = async (req, res) => {
   try {
-    const products = await Product.find()
+    const { mainCategory, subCategory } = req.query;
+    let query = {};
+
+    if (mainCategory) query.mainCategory = mainCategory;
+    if (subCategory) query.subCategory = subCategory;
+
+    const products = await Product.find(query)
       .populate("vendor", "name email")
       .sort({ createdAt: -1 });
 
@@ -97,8 +138,13 @@ export const getProducts = async (req, res) => {
 ========================= */
 export const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).populate("vendor", "name");
-    if (!product) return res.status(404).json({ message: "Product not found" });
+    const product = await Product.findById(req.params.id).populate(
+      "vendor",
+      "name email"
+    );
+
+    if (!product)
+      return res.status(404).json({ message: "Product not found" });
 
     res.status(200).json(product);
   } catch (err) {
@@ -112,34 +158,72 @@ export const getProductById = async (req, res) => {
 export const updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ message: "Product not found" });
+
+    if (!product)
+      return res.status(404).json({ message: "Product not found" });
 
     let finalImages = [];
 
-    // 1. (Existing Images)
+    // Keep existing images
     if (req.body.existingImages) {
       finalImages = ensureArray(req.body.existingImages);
     }
 
-    // 2. add new images
+    // Add new uploaded images
     if (req.files && req.files.length > 0) {
-      const newUrls = req.files.map(file => file.path);
+      const newUrls = req.files.map((file) => file.path);
       finalImages = [...finalImages, ...newUrls];
     }
 
-    // 3. Update Data Object
     const updateFields = {
-      ...req.body,
-      price: Number(req.body.price),
-      offerPrice: Number(req.body.offerPrice || 0),
-      stock: Number(req.body.stock),
-      images: finalImages,
-      dimensions: typeof req.body.dimensions === "string" ? JSON.parse(req.body.dimensions) : req.body.dimensions,
-      colors: ensureArray(req.body.colors),
-      seat: ensureArray(req.body.seat).map(Number).filter(n => !isNaN(n)),
-      isFeatured: String(req.body.isFeatured) === "true",
-      isBestSeller: String(req.body.isBestSeller) === "true",
-      isActive: String(req.body.isActive) === "true",
+      name: req.body.name || product.name,
+      description: req.body.description || product.description,
+      mainCategory: req.body.mainCategory || product.mainCategory,
+      subCategory: req.body.subCategory || product.subCategory,
+      material: req.body.material || product.material,
+
+      price: toNumber(req.body.price, product.price),
+      offerPrice: toNumber(req.body.offerPrice, product.offerPrice),
+      stock: toNumber(req.body.stock, product.stock),
+
+      images: finalImages.length > 0 ? finalImages : product.images,
+
+      slug: req.body.name
+        ? slugify(req.body.name, {
+            lower: true,
+            strict: true,
+          }) + "-" + Date.now()
+        : product.slug,
+
+      dimensions:
+        typeof req.body.dimensions === "string"
+          ? JSON.parse(req.body.dimensions || "{}")
+          : req.body.dimensions || product.dimensions,
+
+      colors: req.body.colors
+        ? ensureArray(req.body.colors)
+        : product.colors,
+
+      seat: req.body.seat
+        ? ensureArray(req.body.seat)
+            .map((n) => Number(n))
+            .filter((n) => !isNaN(n))
+        : product.seat,
+
+      isFeatured:
+        req.body.isFeatured !== undefined
+          ? String(req.body.isFeatured) === "true"
+          : product.isFeatured,
+
+      isBestSeller:
+        req.body.isBestSeller !== undefined
+          ? String(req.body.isBestSeller) === "true"
+          : product.isBestSeller,
+
+      isActive:
+        req.body.isActive !== undefined
+          ? String(req.body.isActive) === "true"
+          : product.isActive,
     };
 
     const updatedProduct = await Product.findByIdAndUpdate(
@@ -149,8 +233,8 @@ export const updateProduct = async (req, res) => {
     );
 
     res.status(200).json(updatedProduct);
-
   } catch (err) {
+    console.error("Update Product Error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -160,8 +244,14 @@ export const updateProduct = async (req, res) => {
 ========================= */
 export const deleteProduct = async (req, res) => {
   try {
-    await Product.findByIdAndDelete(req.params.id);
-    res.status(200).json({ message: "Product Deleted Successfully" });
+    const deleted = await Product.findByIdAndDelete(req.params.id);
+
+    if (!deleted)
+      return res.status(404).json({ message: "Product not found" });
+
+    res.status(200).json({
+      message: "Product Deleted Successfully",
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

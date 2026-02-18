@@ -56,7 +56,7 @@ app.use((req, res, next) => {
 // Global Error Handler
 // Global Error Handler
 app.use((err, req, res, next) => {
-    // എറർ ഒബ്ജക്റ്റ് ആണോ എന്ന് ചെക്ക് ചെയ്യുന്നു
+    
     console.log("--- ERROR DETECTED ---");
     console.log("Error type:", typeof err);
     console.log("Error content:", err); 
