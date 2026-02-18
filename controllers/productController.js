@@ -4,13 +4,24 @@ import slugify from "slugify";
 /* =========================
    HELPER FUNCTIONS
 ========================= */
+
+// Convert to Array safely
 const ensureArray = (data) => {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   if (typeof data === "string") {
-    return data.split(',').map(item => item.trim()).filter(item => item !== "");
+    return data
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item !== "");
   }
   return [data];
+};
+
+// Safe number conversion
+const toNumber = (value, defaultValue = 0) => {
+  const num = Number(value);
+  return isNaN(num) ? defaultValue : num;
 };
 
 /* =========================
@@ -18,61 +29,85 @@ const ensureArray = (data) => {
 ========================= */
 export const createProduct = async (req, res) => {
   try {
-    // 1. Auth Check
     if (!req.user) {
-      return res.status(401).json({ message: "ലോഗിൻ വിവരങ്ങൾ ലഭ്യമല്ല!" });
+      return res.status(401).json({ message: "Login required" });
     }
 
-    const imageUrls = req.files ? req.files.map(file => file.path) : [];
-
     const {
-      description, price,
-      offerPrice, material, stock, dimensions, colors, seat,
-      isFeatured, isBestSeller, isActive
+      name,
+      description,
+      mainCategory,
+      subCategory,
+      price,
+      offerPrice,
+      material,
+      stock,
+      dimensions,
+      colors,
+      seat,
+      isFeatured,
+      isBestSeller,
+      isActive,
     } = req.body;
 
-    const name = req.body.name;
-    const mainCategory = req.body.mainCategory;
-    const subCategory = req.body.subCategory;
-
+    // Required validation
     if (!name || !mainCategory || !subCategory) {
       return res.status(400).json({
-        message: `Missing: ${!name ? 'Name ' : ''}${!mainCategory ? 'Category ' : ''}${!subCategory ? 'SubCat' : ''}`
+        message: `Missing fields: ${
+          !name ? "Name " : ""
+        }${!mainCategory ? "MainCategory " : ""}${
+          !subCategory ? "SubCategory" : ""
+        }`,
       });
     }
 
+    const imageUrls = req.files
+      ? req.files.map((file) => file.path)
+      : [];
+
     const productData = {
-      name,
+      name: name.trim(),
       description: description || "",
       mainCategory,
       subCategory,
-      price: Number(price) || 0,
-      offerPrice: Number(offerPrice) || 0,
+      price: toNumber(price),
+      offerPrice: toNumber(offerPrice),
       material: material || "",
-      stock: Number(stock) || 0,
+      stock: toNumber(stock),
       vendor: req.user.id,
       images: imageUrls,
-      slug: slugify(name, { lower: true, strict: true }) + "-" + Date.now(),
+      slug:
+        slugify(name, { lower: true, strict: true }) +
+        "-" +
+        Date.now(),
 
-      // Booleans (String to Boolean conversion)
+      // Boolean handling
       isFeatured: String(isFeatured) === "true",
       isBestSeller: String(isBestSeller) === "true",
-      isActive: String(isActive) === "true",
+      isActive:
+        isActive !== undefined
+          ? String(isActive) === "true"
+          : true,
 
-      // Arrays handling
-      colors: colors ? colors.split(',').map(c => c.trim()) : [],
-      seat: seat ? seat.split(',').map(Number).filter(n => !isNaN(n)) : [],
+      // Array handling
+      colors: ensureArray(colors),
+      seat: ensureArray(seat)
+        .map((n) => Number(n))
+        .filter((n) => !isNaN(n)),
 
-      // Dimensions Parsing
-      dimensions: typeof dimensions === "string" ? JSON.parse(dimensions) : dimensions
+      // JSON parse safely
+      dimensions:
+        typeof dimensions === "string"
+          ? JSON.parse(dimensions || "{}")
+          : dimensions || {},
     };
 
     const product = new Product(productData);
     const savedProduct = await product.save();
 
     res.status(201).json(savedProduct);
-
   } catch (err) {
+    console.error("Create Product Error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -82,7 +117,13 @@ export const createProduct = async (req, res) => {
 ========================= */
 export const getProducts = async (req, res) => {
   try {
-    const products = await Product.find()
+    const { mainCategory, subCategory } = req.query;
+    let query = {};
+
+    if (mainCategory) query.mainCategory = mainCategory;
+    if (subCategory) query.subCategory = subCategory;
+
+    const products = await Product.find(query)
       .populate("vendor", "name email")
       .sort({ createdAt: -1 });
 
@@ -97,8 +138,13 @@ export const getProducts = async (req, res) => {
 ========================= */
 export const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).populate("vendor", "name");
-    if (!product) return res.status(404).json({ message: "Product not found" });
+    const product = await Product.findById(req.params.id).populate(
+      "vendor",
+      "name email"
+    );
+
+    if (!product)
+      return res.status(404).json({ message: "Product not found" });
 
     res.status(200).json(product);
   } catch (err) {
@@ -133,7 +179,7 @@ export const updateProduct = async (req, res) => {
     }
 
     if (req.files && req.files.length > 0) {
-      const newUrls = req.files.map(file => file.path);
+      const newUrls = req.files.map((file) => file.path);
       finalImages = [...finalImages, ...newUrls];
     }
 
@@ -167,7 +213,6 @@ export const updateProduct = async (req, res) => {
     );
 
     res.status(200).json(updatedProduct);
-
   } catch (err) {
     console.error("Update Error:", err);
     res.status(500).json({ message: err.message });
@@ -178,8 +223,14 @@ export const updateProduct = async (req, res) => {
 ========================= */
 export const deleteProduct = async (req, res) => {
   try {
-    await Product.findByIdAndDelete(req.params.id);
-    res.status(200).json({ message: "Product Deleted Successfully" });
+    const deleted = await Product.findByIdAndDelete(req.params.id);
+
+    if (!deleted)
+      return res.status(404).json({ message: "Product not found" });
+
+    res.status(200).json({
+      message: "Product Deleted Successfully",
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
