@@ -109,41 +109,59 @@ export const getProductById = async (req, res) => {
 /* =========================
    UPDATE PRODUCT
 ========================= */
+/* =========================
+   UPDATE PRODUCT
+========================= */
 export const updateProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ message: "Product not found" });
-
-    let finalImages = [];
-
-    // 1. (Existing Images)
-    if (req.body.existingImages) {
-      finalImages = ensureArray(req.body.existingImages);
+    const { id } = req.params;
+    const product = await Product.findById(id);
+    
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
     }
 
-    // 2. add new images
+    // req.body-യിൽ നിന്ന് vendor മാറ്റുക. കാരണം vendor മാറ്റാൻ പാടില്ല, 
+    // അല്ലെങ്കിൽ അത് Object ആയി വന്ന് എറർ അടിക്കും.
+    const { vendor, ...otherBodyData } = req.body;
+
+    let finalImages = [];
+    if (req.body.existingImages) {
+      finalImages = ensureArray(req.body.existingImages);
+    } else {
+      finalImages = product.images; 
+    }
+
     if (req.files && req.files.length > 0) {
       const newUrls = req.files.map(file => file.path);
       finalImages = [...finalImages, ...newUrls];
     }
 
-    // 3. Update Data Object
+    let parsedDimensions = otherBodyData.dimensions;
+    if (typeof otherBodyData.dimensions === "string") {
+      try {
+        parsedDimensions = JSON.parse(otherBodyData.dimensions);
+      } catch (e) {
+        parsedDimensions = product.dimensions;
+      }
+    }
+
     const updateFields = {
-      ...req.body,
-      price: Number(req.body.price),
-      offerPrice: Number(req.body.offerPrice || 0),
-      stock: Number(req.body.stock),
+      ...otherBodyData, // vendor ഇല്ലാത്ത ബാക്കി ഡാറ്റ മാത്രം എടുക്കുന്നു
+      price: otherBodyData.price ? Number(otherBodyData.price) : product.price,
+      offerPrice: otherBodyData.offerPrice ? Number(otherBodyData.offerPrice) : product.offerPrice,
+      stock: otherBodyData.stock ? Number(otherBodyData.stock) : product.stock,
       images: finalImages,
-      dimensions: typeof req.body.dimensions === "string" ? JSON.parse(req.body.dimensions) : req.body.dimensions,
-      colors: ensureArray(req.body.colors),
-      seat: ensureArray(req.body.seat).map(Number).filter(n => !isNaN(n)),
-      isFeatured: String(req.body.isFeatured) === "true",
-      isBestSeller: String(req.body.isBestSeller) === "true",
-      isActive: String(req.body.isActive) === "true",
+      dimensions: parsedDimensions,
+      colors: otherBodyData.colors ? ensureArray(otherBodyData.colors) : product.colors,
+      seat: otherBodyData.seat ? ensureArray(otherBodyData.seat).map(Number).filter(n => !isNaN(n)) : product.seat,
+      isFeatured: otherBodyData.isFeatured !== undefined ? String(otherBodyData.isFeatured) === "true" : product.isFeatured,
+      isBestSeller: otherBodyData.isBestSeller !== undefined ? String(otherBodyData.isBestSeller) === "true" : product.isBestSeller,
+      isActive: otherBodyData.isActive !== undefined ? String(otherBodyData.isActive) === "true" : product.isActive,
     };
 
     const updatedProduct = await Product.findByIdAndUpdate(
-      req.params.id,
+      id,
       { $set: updateFields },
       { new: true, runValidators: true }
     );
@@ -151,10 +169,10 @@ export const updateProduct = async (req, res) => {
     res.status(200).json(updatedProduct);
 
   } catch (err) {
+    console.error("Update Error:", err);
     res.status(500).json({ message: err.message });
   }
 };
-
 /* =========================
    DELETE PRODUCT
 ========================= */
