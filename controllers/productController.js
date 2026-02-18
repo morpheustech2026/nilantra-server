@@ -120,8 +120,16 @@ export const getProducts = async (req, res) => {
     const { mainCategory, subCategory } = req.query;
     let query = {};
 
-    if (mainCategory) query.mainCategory = mainCategory;
-    if (subCategory) query.subCategory = subCategory;
+    if (mainCategory) {
+      // ഹൈഫൻ ഉണ്ടെങ്കിൽ സ്പേസ് ആക്കുന്നു, എന്നിട്ട് Case-Insensitive ആയി തിരയുന്നു
+      const formattedMain = mainCategory.replace(/-/g, " ");
+      query.mainCategory = { $regex: new RegExp(`^${formattedMain}$`, "i") };
+    }
+
+    if (subCategory) {
+      const formattedSub = subCategory.replace(/-/g, " ");
+      query.subCategory = { $regex: new RegExp(`^${formattedSub}$`, "i") };
+    }
 
     const products = await Product.find(query)
       .populate("vendor", "name email")
